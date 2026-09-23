@@ -13,6 +13,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # quieter TensorFlow logs
 # --------------------------------------------------------------------------- #
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.keras")
 DEFAULT_IMG_SIZE = 128          # used if the model's input size can't be read
+BACKBONE_NAME = "ResNet50"      # best model selected in the notebook
 GITHUB_URL = "https://github.com/tusharmallick/cat_dog_cnn_classification"
 
 # --------------------------------------------------------------------------- #
@@ -68,8 +69,21 @@ def load_model():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
 
+    # The notebook built the model with:
+    #     layers.Lambda(resnet50.preprocess_input, name="preprocess")
+    # Keras saves only the *name* of that function, so it must be supplied here
+    # when loading, otherwise deserialization fails with
+    # "Could not locate function 'preprocess_input'".
+    custom_objects = {
+        "preprocess_input": tf.keras.applications.resnet50.preprocess_input,
+    }
+
     # compile=False is fine for inference-only use
-    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    model = tf.keras.models.load_model(
+        MODEL_PATH,
+        custom_objects=custom_objects,
+        compile=False,
+    )
 
     # Read the expected input size from the model (falls back to the default)
     img_size = DEFAULT_IMG_SIZE
@@ -95,7 +109,7 @@ except Exception as e:
         Please make sure:
         1. `best_model.keras` is in the same folder as `app.py`
         2. All dependencies from `requirements.txt` are installed
-        3. The TensorFlow version matches the one used to train/save the model
+        3. The TensorFlow version matches the one used to train/save the model (2.20.0)
         """
     )
     st.stop()
@@ -105,10 +119,17 @@ except Exception as e:
 # Helpers
 # --------------------------------------------------------------------------- #
 def preprocess(image: Image.Image, size: int) -> np.ndarray:
-    """Convert a PIL image into a (1, size, size, 3) float32 batch in [0, 1]."""
-    img = ImageOps.exif_transpose(image)          # fix phone-photo rotation
-    img = img.convert("RGB").resize((size, size))
-    arr = np.asarray(img, dtype="float32") / 255.0
+    """
+    Convert a PIL image into a (1, size, size, 3) float32 batch with raw
+    pixel values in [0, 255].
+
+    NOTE: do NOT divide by 255 here. The model already contains its own
+    ResNet50 preprocessing layer (RGB->BGR + ImageNet mean subtraction),
+    exactly as it did during training.
+    """
+    img = ImageOps.exif_transpose(image)                     # fix phone-photo rotation
+    img = img.convert("RGB").resize((size, size), Image.BILINEAR)  # same as Keras image_dataset_from_directory
+    arr = np.asarray(img, dtype="float32")
     return np.expand_dims(arr, axis=0)
 
 
@@ -128,7 +149,7 @@ st.markdown('<div class="subtitle">Transfer Learning CNN using TensorFlow</div>'
 st.sidebar.markdown("### 📊 Model Info")
 st.sidebar.info(
     f"""
-- **Architecture**: Transfer Learning CNN
+- **Architecture**: {BACKBONE_NAME} (transfer learning, fine-tuned)
 - **Input Size**: {IMG_SIZE}×{IMG_SIZE} pixels
 - **Classes**: Cat | Dog
 - **Framework**: TensorFlow
