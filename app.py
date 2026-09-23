@@ -13,7 +13,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # quieter TensorFlow logs
 # --------------------------------------------------------------------------- #
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.keras")
 DEFAULT_IMG_SIZE = 128          # used if the model's input size can't be read
-BACKBONE_NAME = "resnet50"      # best model selected in the notebook
+BACKBONE_NAME = "MobileNetV2"      # best model selected in the notebook
 GITHUB_URL = "https://github.com/tusharmallick/cat_dog_cnn_classification"
 
 # --------------------------------------------------------------------------- #
@@ -70,12 +70,12 @@ def load_model():
         raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
 
     # The notebook built the model with:
-    #     layers.Lambda(resnet50.preprocess_input, name="preprocess")
+    #     layers.Lambda(MobileNetV2.preprocess_input, name="preprocess")
     # Keras saves only the *name* of that function, so it must be supplied here
     # when loading, otherwise deserialization fails with
     # "Could not locate function 'preprocess_input'".
     custom_objects = {
-        "preprocess_input": tf.keras.applications.resnet50.preprocess_input,
+        "preprocess_input": tf.keras.applications.MobileNetV2.preprocess_input,
     }
 
     # compile=False is fine for inference-only use
@@ -124,7 +124,7 @@ def preprocess(image: Image.Image, size: int) -> np.ndarray:
     pixel values in [0, 255].
 
     NOTE: do NOT divide by 255 here. The model already contains its own
-    ResNet50 preprocessing layer (RGB->BGR + ImageNet mean subtraction),
+    MobileNetV2 preprocessing layer (RGB->BGR + ImageNet mean subtraction),
     exactly as it did during training.
     """
     img = ImageOps.exif_transpose(image)                     # fix phone-photo rotation
