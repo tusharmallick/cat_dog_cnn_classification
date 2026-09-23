@@ -13,7 +13,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # quieter TensorFlow logs
 # --------------------------------------------------------------------------- #
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.keras")
 DEFAULT_IMG_SIZE = 128          # used if the model's input size can't be read
-BACKBONE_NAME = "MobileNetV2 "      # best model selected in the notebook
+BACKBONE_NAME = "resnet50"      # best model selected in the notebook
 GITHUB_URL = "https://github.com/tusharmallick/cat_dog_cnn_classification"
 
 # --------------------------------------------------------------------------- #
