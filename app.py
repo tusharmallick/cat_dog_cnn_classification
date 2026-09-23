@@ -55,19 +55,39 @@ st.markdown("""
 def load_model():
     """Load the pre-trained model."""
     try:
+        import warnings
+        warnings.filterwarnings('ignore')
+        
+        # Use compile=False to avoid serialization issues
         model = tf.keras.models.load_model("best_model.keras", compile=False)
-        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        # Recompile the model after loading
+        model.compile(
+            optimizer='adam',
+            loss='binary_crossentropy',
+            metrics=['accuracy']
+        )
         return model
     except FileNotFoundError:
         st.error("""
         ❌ Model file not found! Please ensure `best_model.keras` is in the same directory as `app.py`.
         
-        Download it from: https://github.com/tusharmallick/cat_dog_cnn_classification
+        You can download it from the GitHub repository or download the model file separately.
+        
+        **Alternative:** If the file is too large for GitHub, download from Google Drive or your backup location
+        and add it to the repository before deploying to Streamlit Cloud.
         """)
         st.stop()
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        st.error("Please ensure TensorFlow and all dependencies are properly installed.")
+        st.stop()
 
-# Load model
-model = load_model()
+# Load model globally with error handling
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"Failed to load model: {e}")
+    st.stop()
 
 # App header
 st.markdown('<div class="main-header">🐾 Cats vs Dogs Classifier</div>', unsafe_allow_html=True)
