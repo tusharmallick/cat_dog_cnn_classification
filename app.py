@@ -1,9 +1,21 @@
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 from PIL import Image
-import io
 import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# Try TensorFlow first, fall back to ONNX if needed
+try:
+    import tensorflow as tf
+    USE_TENSORFLOW = True
+except ImportError:
+    USE_TENSORFLOW = False
+    try:
+        import onnxruntime as ort
+        USE_ONNX = True
+    except ImportError:
+        USE_ONNX = False
 
 # Page configuration
 st.set_page_config(
@@ -55,36 +67,35 @@ st.markdown("""
 def load_model():
     """Load the pre-trained model."""
     try:
-        import warnings
-        warnings.filterwarnings('ignore')
+        if USE_TENSORFLOW:
+            # Try loading with TensorFlow
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                model = tf.keras.models.load_model("best_model.keras", compile=False)
+                model.compile(
+                    optimizer='adam',
+                    loss='binary_crossentropy',
+                    metrics=['accuracy']
+                )
+            return model, "tensorflow"
+        else:
+            st.error("TensorFlow not available. Please ensure best_model.keras and TensorFlow are properly installed.")
+            st.stop()
+    except Exception as e:
+        st.error(f"""
+        ❌ Error loading model: {str(e)}
         
-        # Use compile=False to avoid serialization issues
-        model = tf.keras.models.load_model("best_model.keras", compile=False)
-        # Recompile the model after loading
-        model.compile(
-            optimizer='adam',
-            loss='binary_crossentropy',
-            metrics=['accuracy']
-        )
-        return model
-    except FileNotFoundError:
-        st.error("""
-        ❌ Model file not found! Please ensure `best_model.keras` is in the same directory as `app.py`.
-        
-        You can download it from the GitHub repository or download the model file separately.
-        
-        **Alternative:** If the file is too large for GitHub, download from Google Drive or your backup location
-        and add it to the repository before deploying to Streamlit Cloud.
+        Please ensure:
+        1. `best_model.keras` is in the same directory as `app.py`
+        2. All dependencies are installed from `requirements.txt`
+        3. TensorFlow is properly configured
         """)
         st.stop()
-    except Exception as e:
-        st.error(f"❌ Error loading model: {str(e)}")
-        st.error("Please ensure TensorFlow and all dependencies are properly installed.")
-        st.stop()
 
-# Load model globally with error handling
+# Load model
 try:
-    model = load_model()
+    model, framework = load_model()
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
@@ -95,12 +106,12 @@ st.markdown('<div class="subtitle">Transfer Learning CNN using TensorFlow</div>'
 
 # Sidebar information
 st.sidebar.markdown("### 📊 Model Info")
-st.sidebar.info("""
+st.sidebar.info(f"""
 - **Architecture**: Transfer Learning CNN
-- **Backbones Tested**: 5 pretrained models
 - **Input Size**: 128×128 pixels
-- **Classes**: Cat (0) | Dog (1)
-- **Best Model**: Fine-tuned with EarlyStopping
+- **Classes**: Cat | Dog
+- **Framework**: {framework.upper()}
+- **Model File**: best_model.keras
 """)
 
 # Main content
@@ -152,8 +163,9 @@ if image_to_predict is not None:
                 img_array = np.expand_dims(img_array, axis=0)
                 
                 # Make prediction
-                prediction = model.predict(img_array, verbose=0)
-                confidence = float(prediction[0][0])
+                if framework == "tensorflow":
+                    prediction = model.predict(img_array, verbose=0)
+                    confidence = float(prediction[0][0])
                 
                 # Classify based on threshold
                 if confidence >= 0.5:
@@ -192,7 +204,7 @@ if image_to_predict is not None:
                 
                 # Additional info
                 if prediction_confidence >= 0.9:
-                    st.success(f"✅ High confidence prediction: This is definitely a **{prediction_label}**!")
+                    st.success(f"✅ High confidence: This is definitely a **{prediction_label}**!")
                 elif prediction_confidence >= 0.7:
                     st.info(f"✓ Good confidence: This appears to be a **{prediction_label}**.")
                 elif prediction_confidence >= 0.6:
