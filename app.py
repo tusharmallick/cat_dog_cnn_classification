@@ -1,32 +1,32 @@
-import streamlit as st
-import numpy as np
-from PIL import Image
 import os
 import warnings
-warnings.filterwarnings('ignore')
 
-# Try TensorFlow first, fall back to ONNX if needed
-try:
-    import tensorflow as tf
-    USE_TENSORFLOW = True
-except ImportError:
-    USE_TENSORFLOW = False
-    try:
-        import onnxruntime as ort
-        USE_ONNX = True
-    except ImportError:
-        USE_ONNX = False
+import numpy as np
+import streamlit as st
+from PIL import Image, ImageOps
 
-# Page configuration
+warnings.filterwarnings("ignore")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # quieter TensorFlow logs
+
+# --------------------------------------------------------------------------- #
+# Config
+# --------------------------------------------------------------------------- #
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_model.keras")
+DEFAULT_IMG_SIZE = 128          # used if the model's input size can't be read
+GITHUB_URL = "https://github.com/tusharmallick/cat_dog_cnn_classification"
+
+# --------------------------------------------------------------------------- #
+# Page setup
+# --------------------------------------------------------------------------- #
 st.set_page_config(
     page_title="Cats vs Dogs Classifier",
     page_icon="🐾",
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Custom CSS
-st.markdown("""
+st.markdown(
+    """
     <style>
     .main-header {
         text-align: center;
@@ -37,7 +37,7 @@ st.markdown("""
     }
     .subtitle {
         text-align: center;
-        color: #666;
+        color: #888;
         font-size: 1.1em;
         margin-bottom: 30px;
     }
@@ -45,182 +45,195 @@ st.markdown("""
         padding: 20px;
         border-radius: 10px;
         margin: 20px 0;
+        color: #222;               /* readable in both light and dark themes */
     }
-    .cat-result {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
-    }
-    .dog-result {
-        background-color: #d1ecf1;
-        border-left: 4px solid #17a2b8;
-    }
-    .confidence {
-        font-size: 1.3em;
-        font-weight: bold;
-        margin: 10px 0;
-    }
+    .result-box h3 { margin: 0 0 8px 0; color: #222; }
+    .cat-result { background-color: #fff3cd; border-left: 4px solid #ffc107; }
+    .dog-result { background-color: #d1ecf1; border-left: 4px solid #17a2b8; }
+    .confidence { font-size: 1.3em; font-weight: bold; }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-# Load model (cached for performance)
-@st.cache_resource
+
+# --------------------------------------------------------------------------- #
+# Model loading (cached)
+# --------------------------------------------------------------------------- #
+@st.cache_resource(show_spinner="Loading model...")
 def load_model():
-    """Load the pre-trained model."""
-    try:
-        if USE_TENSORFLOW:
-            # Try loading with TensorFlow
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                model = tf.keras.models.load_model("best_model.keras", compile=False)
-                model.compile(
-                    optimizer='adam',
-                    loss='binary_crossentropy',
-                    metrics=['accuracy']
-                )
-            return model, "tensorflow"
-        else:
-            st.error("TensorFlow not available. Please ensure best_model.keras and TensorFlow are properly installed.")
-            st.stop()
-    except Exception as e:
-        st.error(f"""
-        ❌ Error loading model: {str(e)}
-        
-        Please ensure:
-        1. `best_model.keras` is in the same directory as `app.py`
-        2. All dependencies are installed from `requirements.txt`
-        3. TensorFlow is properly configured
-        """)
-        st.stop()
+    """Load the trained Keras model once and reuse it across reruns."""
+    import tensorflow as tf  # imported lazily so import errors show in the UI
 
-# Load model
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
+
+    # compile=False is fine for inference-only use
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+
+    # Read the expected input size from the model (falls back to the default)
+    img_size = DEFAULT_IMG_SIZE
+    try:
+        shape = model.input_shape
+        if isinstance(shape, list):
+            shape = shape[0]
+        if shape[1] and shape[2]:
+            img_size = int(shape[1])
+    except Exception:
+        pass
+
+    return model, img_size
+
+
 try:
-    model, framework = load_model()
+    model, IMG_SIZE = load_model()
 except Exception as e:
-    st.error(f"Failed to load model: {e}")
+    st.error(
+        f"""
+        ❌ **Error loading model:** {e}
+
+        Please make sure:
+        1. `best_model.keras` is in the same folder as `app.py`
+        2. All dependencies from `requirements.txt` are installed
+        3. The TensorFlow version matches the one used to train/save the model
+        """
+    )
     st.stop()
 
-# App header
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def preprocess(image: Image.Image, size: int) -> np.ndarray:
+    """Convert a PIL image into a (1, size, size, 3) float32 batch in [0, 1]."""
+    img = ImageOps.exif_transpose(image)          # fix phone-photo rotation
+    img = img.convert("RGB").resize((size, size))
+    arr = np.asarray(img, dtype="float32") / 255.0
+    return np.expand_dims(arr, axis=0)
+
+
+def predict_dog_probability(image: Image.Image) -> float:
+    """Return P(dog) as a float in [0, 1]."""
+    batch = preprocess(image, IMG_SIZE)
+    pred = model.predict(batch, verbose=0)
+    return float(np.clip(np.ravel(pred)[0], 0.0, 1.0))
+
+
+# --------------------------------------------------------------------------- #
+# Header + sidebar
+# --------------------------------------------------------------------------- #
 st.markdown('<div class="main-header">🐾 Cats vs Dogs Classifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Transfer Learning CNN using TensorFlow</div>', unsafe_allow_html=True)
 
-# Sidebar information
 st.sidebar.markdown("### 📊 Model Info")
-st.sidebar.info(f"""
+st.sidebar.info(
+    f"""
 - **Architecture**: Transfer Learning CNN
-- **Input Size**: 128×128 pixels
+- **Input Size**: {IMG_SIZE}×{IMG_SIZE} pixels
 - **Classes**: Cat | Dog
-- **Framework**: {framework.upper()}
+- **Framework**: TensorFlow
 - **Model File**: best_model.keras
-""")
+"""
+)
 
-# Main content
+# --------------------------------------------------------------------------- #
+# Image input
+# --------------------------------------------------------------------------- #
 st.markdown("### 📸 Upload an Image")
 
-# Upload method selection
-upload_method = st.radio("Choose upload method:", ["Upload Image", "Use Camera"], horizontal=True)
-
-uploaded_file = None
-camera_image = None
+upload_method = st.radio("Choose input method:", ["Upload Image", "Use Camera"], horizontal=True)
 
 if upload_method == "Upload Image":
-    uploaded_file = st.file_uploader(
+    source_file = st.file_uploader(
         "Choose an image file (JPG, PNG, etc.)",
         type=["jpg", "jpeg", "png", "bmp", "gif", "webp"],
-        help="Upload an image of a cat or dog for classification"
+        help="Upload an image of a cat or dog for classification",
     )
 else:
-    camera_image = st.camera_input("Take a photo")
+    source_file = st.camera_input("Take a photo")
 
-# Process uploaded or camera image
-image_to_predict = None
-if uploaded_file is not None:
-    image_to_predict = Image.open(uploaded_file)
-elif camera_image is not None:
-    image_to_predict = Image.open(camera_image)
+image = None
+if source_file is not None:
+    try:
+        image = Image.open(source_file)
+        image.load()  # force decoding now so bad files fail here
+    except Exception as e:
+        st.error(f"❌ Could not open this image: {e}")
+        image = None
 
-if image_to_predict is not None:
-    # Display image info
+# --------------------------------------------------------------------------- #
+# Prediction UI
+# --------------------------------------------------------------------------- #
+if image is not None:
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        st.image(image_to_predict, caption="Uploaded Image", use_column_width=True)
-    
+        st.image(image, caption="Input Image", use_container_width=True)
+
     with col2:
         st.markdown("#### Image Details")
-        st.write(f"**Size:** {image_to_predict.size[0]} × {image_to_predict.size[1]} px")
-        st.write(f"**Format:** {image_to_predict.format}")
-        st.write(f"**Mode:** {image_to_predict.mode}")
-    
-    # Preprocess image
+        st.write(f"**Size:** {image.size[0]} × {image.size[1]} px")
+        st.write(f"**Format:** {image.format or 'N/A'}")
+        st.write(f"**Mode:** {image.mode}")
+
     if st.button("🔍 Classify Image", use_container_width=True, type="primary"):
         with st.spinner("Analyzing image..."):
             try:
-                # Resize to model input size
-                img_array = image_to_predict.convert("RGB")
-                img_array = img_array.resize((128, 128))
-                img_array = np.array(img_array, dtype="float32") / 255.0
-                img_array = np.expand_dims(img_array, axis=0)
-                
-                # Make prediction
-                if framework == "tensorflow":
-                    prediction = model.predict(img_array, verbose=0)
-                    confidence = float(prediction[0][0])
-                
-                # Classify based on threshold
-                if confidence >= 0.5:
-                    prediction_class = "🐕 Dog"
-                    prediction_label = "Dog"
-                    prediction_confidence = confidence
-                    css_class = "dog-result"
-                else:
-                    prediction_class = "🐱 Cat"
-                    prediction_label = "Cat"
-                    prediction_confidence = 1 - confidence
-                    css_class = "cat-result"
-                
-                # Display result
-                st.markdown("---")
-                st.markdown(f'<div class="result-box {css_class}">', unsafe_allow_html=True)
-                st.markdown(f'### {prediction_class}')
-                st.markdown(f'<div class="confidence">Confidence: {prediction_confidence * 100:.2f}%</div>', unsafe_allow_html=True)
-                
-                # Detailed metrics
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Dog Probability", f"{confidence * 100:.1f}%")
-                with col2:
-                    st.metric("Cat Probability", f"{(1 - confidence) * 100:.1f}%")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Confidence bar
-                st.markdown("### Prediction Breakdown")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.progress(confidence, text=f"Dog: {confidence:.1%}")
-                with col2:
-                    st.progress(1 - confidence, text=f"Cat: {(1-confidence):.1%}")
-                
-                # Additional info
-                if prediction_confidence >= 0.9:
-                    st.success(f"✅ High confidence: This is definitely a **{prediction_label}**!")
-                elif prediction_confidence >= 0.7:
-                    st.info(f"✓ Good confidence: This appears to be a **{prediction_label}**.")
-                elif prediction_confidence >= 0.6:
-                    st.warning(f"⚠️ Moderate confidence: This is likely a **{prediction_label}**, but uncertain.")
-                else:
-                    st.warning("⚠️ Low confidence: The model is uncertain. Image might be ambiguous or low quality.")
-                
+                dog_prob = predict_dog_probability(image)
             except Exception as e:
-                st.error(f"❌ Error processing image: {str(e)}")
-                st.error("Please ensure the image is valid and try again.")
+                st.error(f"❌ Error processing image: {e}")
+                st.stop()
 
+        cat_prob = 1.0 - dog_prob
+
+        if dog_prob >= 0.5:
+            label, emoji, css_class, conf = "Dog", "🐕", "dog-result", dog_prob
+        else:
+            label, emoji, css_class, conf = "Cat", "🐱", "cat-result", cat_prob
+
+        st.markdown("---")
+
+        # Whole box rendered in ONE markdown call so the styling actually applies
+        st.markdown(
+            f"""
+            <div class="result-box {css_class}">
+                <h3>{emoji} {label}</h3>
+                <div class="confidence">Confidence: {conf * 100:.2f}%</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        m1, m2 = st.columns(2)
+        m1.metric("Dog Probability", f"{dog_prob * 100:.1f}%")
+        m2.metric("Cat Probability", f"{cat_prob * 100:.1f}%")
+
+        st.markdown("### Prediction Breakdown")
+        b1, b2 = st.columns(2)
+        with b1:
+            st.progress(dog_prob, text=f"Dog: {dog_prob:.1%}")
+        with b2:
+            st.progress(cat_prob, text=f"Cat: {cat_prob:.1%}")
+
+        if conf >= 0.9:
+            st.success(f"✅ High confidence: This is very likely a **{label}**.")
+        elif conf >= 0.7:
+            st.info(f"✓ Good confidence: This appears to be a **{label}**.")
+        elif conf >= 0.6:
+            st.warning(f"⚠️ Moderate confidence: Likely a **{label}**, but uncertain.")
+        else:
+            st.warning("⚠️ Low confidence: The image may be ambiguous or low quality.")
+
+# --------------------------------------------------------------------------- #
 # Footer
+# --------------------------------------------------------------------------- #
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #888; font-size: 0.9em;'>
-    <p>🔬 Built with Transfer Learning CNN | TensorFlow & Streamlit</p>
-    <p><a href='https://github.com/tusharmallick/cat_dog_cnn_classification' target='_blank'>View Project on GitHub</a></p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div style='text-align: center; color: #888; font-size: 0.9em;'>
+        <p>🔬 Built with Transfer Learning CNN | TensorFlow & Streamlit</p>
+        <p><a href='{GITHUB_URL}' target='_blank'>View Project on GitHub</a></p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
