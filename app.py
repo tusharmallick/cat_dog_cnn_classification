@@ -70,12 +70,12 @@ def load_model():
         raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
 
     # The notebook built the model with:
-    #     layers.Lambda(MobileNetV2.preprocess_input, name="preprocess")
+    #     layers.Lambda(mobilenet_v2.preprocess_input, name="preprocess")
     # Keras saves only the *name* of that function, so it must be supplied here
     # when loading, otherwise deserialization fails with
     # "Could not locate function 'preprocess_input'".
     custom_objects = {
-        "preprocess_input": tf.keras.applications.MobileNetV2.preprocess_input,
+        "preprocess_input": tf.keras.applications.mobilenet_v2.preprocess_input,
     }
 
     # compile=False is fine for inference-only use
@@ -124,7 +124,7 @@ def preprocess(image: Image.Image, size: int) -> np.ndarray:
     pixel values in [0, 255].
 
     NOTE: do NOT divide by 255 here. The model already contains its own
-    MobileNetV2 preprocessing layer (RGB->BGR + ImageNet mean subtraction),
+    MobileNetV2 preprocessing layer (which scales pixels to [-1, 1]),
     exactly as it did during training.
     """
     img = ImageOps.exif_transpose(image)                     # fix phone-photo rotation
