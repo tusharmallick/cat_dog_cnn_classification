@@ -55,7 +55,8 @@ st.markdown("""
 def load_model():
     """Load the pre-trained model."""
     try:
-        model = tf.keras.models.load_model("best_model.keras")
+        model = tf.keras.models.load_model("best_model.keras", compile=False)
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
         return model
     except FileNotFoundError:
         st.error("""
